@@ -429,6 +429,39 @@ launch_commands_in_panes() {
 }
 
 # ============================================================================
+# Status Bar (v0.3 - tmux-code-70p.1.1)
+# ============================================================================
+
+# Configure the tmux status bar for a session
+# Shows: session name | git branch | mode indicator
+configure_status_bar() {
+    local session="$1"
+
+    # Status bar general settings
+    tmux set-option -t "$session" status on
+    tmux set-option -t "$session" status-interval 5
+    tmux set-option -t "$session" status-position bottom
+
+    # Colors: dark theme to match typical terminal aesthetics
+    tmux set-option -t "$session" status-style "bg=colour235,fg=colour248"
+
+    # Left side: session name
+    tmux set-option -t "$session" status-left-length 30
+    tmux set-option -t "$session" status-left "#[fg=colour117,bold] #S #[fg=colour245]│ "
+
+    # Right side: git branch and mode indicator
+    # Git branch uses shell command to get current branch
+    # Mode indicator reads from tmux environment variable
+    tmux set-option -t "$session" status-right-length 60
+    tmux set-option -t "$session" status-right "#[fg=colour245]│ #[fg=colour114]󰊢 #(git -C '#{pane_current_path}' branch --show-current 2>/dev/null || echo 'no-git') #[fg=colour245]│ #[fg=colour223]#{?#{==:#{TMUX_CODE_LEFT_MODE},git},󰊢 git,󰙅 explorer}"
+
+    # Window/pane status (middle section)
+    tmux set-option -t "$session" window-status-format " #I:#W "
+    tmux set-option -t "$session" window-status-current-format "#[fg=colour117,bold] #I:#W "
+    tmux set-option -t "$session" window-status-separator ""
+}
+
+# ============================================================================
 # Layout Creation (0h6.2.1, 0h6.2.2, 0h6.2.3)
 # ============================================================================
 
@@ -607,6 +640,9 @@ main() {
 
     # Source keybindings
     source_keybindings "$session_name"
+
+    # Configure status bar
+    configure_status_bar "$session_name"
 
     # Launch commands in panes
     launch_commands_in_panes "$session_name" "$layout" "$explorer_cmd" "$editor_cmd" "$ai_cmd"
