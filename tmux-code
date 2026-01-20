@@ -102,7 +102,7 @@ LAYOUT:
 
 TOOL DETECTION:
     File explorer: lf → ranger → tree
-    Editor: nvim → vim
+    Editor: $EDITOR → nvim → vim
     AI agent: claude → aider (or specify with --agent)
 EOF
 }
@@ -252,9 +252,20 @@ detect_file_explorer() {
     fi
 }
 
-# Detect editor: nvim → vim fallback chain
+# Detect editor: $EDITOR → nvim → vim fallback chain
 # Returns: command name or empty string if none available
 detect_editor() {
+    # First, respect $EDITOR environment variable if set and valid
+    if [[ -n "${EDITOR:-}" ]]; then
+        # Extract the base command (in case $EDITOR has flags like "vim -u NONE")
+        local editor_base="${EDITOR%% *}"
+        if command -v "$editor_base" &>/dev/null; then
+            echo "$EDITOR"
+            return
+        fi
+    fi
+
+    # Fallback chain: nvim → vim
     if command -v nvim &>/dev/null; then
         echo "nvim"
     elif command -v vim &>/dev/null; then
