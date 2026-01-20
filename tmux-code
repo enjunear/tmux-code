@@ -11,6 +11,97 @@
 set -euo pipefail
 
 # ============================================================================
+# Argument Parsing (0h6.4.1)
+# ============================================================================
+
+# Global variables for parsed arguments
+TMUX_CODE_PATH="."
+TMUX_CODE_AGENT=""
+TMUX_CODE_NO_AGENT=false
+TMUX_CODE_NEW=false
+TMUX_CODE_HELP=false
+
+# Parse command line arguments
+# Arguments: "$@"
+parse_args() {
+    while [[ $# -gt 0 ]]; do
+        case "$1" in
+            --agent)
+                if [[ $# -lt 2 || "$2" == --* ]]; then
+                    echo "Error: --agent requires a command argument" >&2
+                    exit 1
+                fi
+                TMUX_CODE_AGENT="$2"
+                shift 2
+                ;;
+            --no-agent)
+                TMUX_CODE_NO_AGENT=true
+                shift
+                ;;
+            --new)
+                TMUX_CODE_NEW=true
+                shift
+                ;;
+            --help|-h)
+                TMUX_CODE_HELP=true
+                shift
+                ;;
+            -*)
+                echo "Error: Unknown option: $1" >&2
+                echo "Run 'tmux-code --help' for usage information." >&2
+                exit 1
+                ;;
+            *)
+                # Positional argument = path
+                TMUX_CODE_PATH="$1"
+                shift
+                ;;
+        esac
+    done
+}
+
+# ============================================================================
+# Help Output (0h6.4.2)
+# ============================================================================
+
+# Display help message
+show_help() {
+    cat << 'EOF'
+tmux-code - A VS Code-inspired terminal IDE using tmux
+
+USAGE:
+    tmux-code [PATH] [OPTIONS]
+
+ARGUMENTS:
+    [PATH]              Directory to open (default: current directory)
+
+OPTIONS:
+    --agent <cmd>       Use specified AI agent command instead of auto-detecting
+    --no-agent          Disable AI agent panel entirely
+    --new               Force create new session (skip attach/recreate prompt)
+    -h, --help          Show this help message
+
+EXAMPLES:
+    tmux-code                    Open current directory
+    tmux-code ~/projects/myapp   Open specified directory
+    tmux-code --no-agent         Open without AI assistant panel
+    tmux-code --agent "aider"    Use aider as the AI agent
+    tmux-code --new              Force new session creation
+
+LAYOUT:
+    The layout adapts based on available tools:
+    - 3-column: File explorer | Editor + Terminal | AI agent
+    - 2-column: File explorer | Editor + Terminal (no AI)
+    - Editor only: Editor + Terminal (no file explorer)
+
+TOOL DETECTION:
+    File explorer: lf → ranger → tree
+    Editor: nvim → vim
+    AI agent: claude → aider (or specify with --agent)
+EOF
+}
+
+# ============================================================================
 # Workspace Name Detection (0h6.1.1)
 # ============================================================================
 
@@ -245,35 +336,47 @@ create_editor_terminal_layout() {
 # ============================================================================
 
 main() {
-    local path="${1:-.}"
+    # Parse arguments
+    parse_args "$@"
+
+    # Handle help flag
+    if [[ "$TMUX_CODE_HELP" == true ]]; then
+        show_help
+        return 0
+    fi
 
     # Resolve to absolute path
     local abs_path
-    abs_path=$(cd "$path" && pwd)
+    abs_path=$(cd "$TMUX_CODE_PATH" && pwd)
 
     # Get session name
     local session_name
-    session_name=$(get_session_name "$path")
+    session_name=$(get_session_name "$TMUX_CODE_PATH")
 
-    # Check if session already exists
+    # Check if session already exists (unless --new forces recreation)
     if tmux has-session -t "$session_name" 2>/dev/null; then
-        prompt_session_exists "$session_name"
-        local action=$?
+        if [[ "$TMUX_CODE_NEW" == true ]]; then
+            echo "Killing session '$session_name'..."
+            tmux kill-session -t "$session_name"
+        else
+            prompt_session_exists "$session_name"
+            local action=$?
 
-        case $action in
-            0)  # Attach
-                tmux attach-session -t "$session_name"
-                return 0
-                ;;
-            1)  # Recreate
-                echo "Killing session '$session_name'..."
-                tmux kill-session -t "$session_name"
-                ;;
-            2)  # Cancel
-                echo "Cancelled."
-                return 0
-                ;;
-        esac
+            case $action in
+                0)  # Attach
+                    tmux attach-session -t "$session_name"
+                    return 0
+                    ;;
+                1)  # Recreate
+                    echo "Killing session '$session_name'..."
+                    tmux kill-session -t "$session_name"
+                    ;;
+                2)  # Cancel
+                    echo "Cancelled."
+                    return 0
+                    ;;
+            esac
+        fi
     fi
 
     # Detect available tools
@@ -282,7 +385,15 @@ main() {
     local ai_cmd
     explorer_cmd=$(detect_file_explorer)
     editor_cmd=$(detect_editor)
-    ai_cmd=$(detect_ai_agent)
+
+    # Handle AI agent: --no-agent disables, --agent overrides, otherwise auto-detect
+    if [[ "$TMUX_CODE_NO_AGENT" == true ]]; then
+        ai_cmd=""
+    elif [[ -n "$TMUX_CODE_AGENT" ]]; then
+        ai_cmd="$TMUX_CODE_AGENT"
+    else
+        ai_cmd=$(detect_ai_agent)
+    fi
 
     # Determine layout based on available tools
     local layout
