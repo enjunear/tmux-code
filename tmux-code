@@ -129,6 +129,10 @@ generate_keybindings_file() {
     local pane_base
     pane_base=$(get_pane_base_index)
 
+    # Get absolute path to this script for keybindings
+    local script_path
+    script_path=$(realpath "${BASH_SOURCE[0]}")
+
     # Generate keybindings file with dynamic pane indices
     cat > "$KEYBINDINGS_FILE" << EOF
 # tmux-code keybindings
@@ -142,7 +146,7 @@ bind-key k select-pane -U
 bind-key l select-pane -R
 
 # Left Panel Mode Toggle (g = git mode toggle)
-bind-key g run-shell "tmux-code toggle-mode"
+bind-key g run-shell "${script_path} toggle-mode"
 
 # Quick Pane Focus (indices relative to pane-base-index)
 bind-key e select-pane -t ${pane_base}   # Explorer (left panel)
@@ -263,9 +267,22 @@ detect_file_explorer() {
     elif command -v ranger &>/dev/null; then
         echo "ranger"
     elif command -v tree &>/dev/null; then
-        echo "tree -C"
+        echo "tree"
     else
         echo ""
+    fi
+}
+
+# Wrap explorer command for execution
+# tree needs watch mode since it's not interactive like lf/ranger
+# Arguments: $1 - explorer command from detect_file_explorer
+wrap_explorer_cmd() {
+    local cmd="$1"
+    if [[ "$cmd" == "tree" ]]; then
+        # Use watch for auto-refresh, -C for color
+        echo "watch -n 2 -c 'tree -C -L 3'"
+    else
+        echo "$cmd"
     fi
 }
 
@@ -358,6 +375,10 @@ start_explorer_mode() {
         return 1
     fi
 
+    # Wrap explorer command (tree needs watch mode)
+    local wrapped_explorer
+    wrapped_explorer=$(wrap_explorer_cmd "$explorer_cmd")
+
     # Get base indices
     local win_base pane_base
     win_base=$(get_base_index)
@@ -366,7 +387,10 @@ start_explorer_mode() {
     # Kill any existing process in left pane and start explorer
     tmux send-keys -t "${session}:${win_base}.${pane_base}" C-c
     sleep 0.1
-    tmux send-keys -t "${session}:${win_base}.${pane_base}" "$explorer_cmd" Enter
+    tmux send-keys -t "${session}:${win_base}.${pane_base}" "$wrapped_explorer" Enter
+
+    # Set pane title
+    tmux select-pane -t "${session}:${win_base}.${pane_base}" -T "Explorer"
 
     # Update mode tracking
     set_left_panel_mode "$session" "$MODE_EXPLORER"
@@ -387,26 +411,28 @@ start_git_mode() {
     tmux send-keys -t "${session}:${win_base}.${pane_base}" C-c
     sleep 0.1
 
-    # Split left pane horizontally: status (top 50%) | log (bottom 50%)
-    # First check if there's already a git-mode split
-    local pane_count
-    pane_count=$(tmux list-panes -t "${session}:${win_base}" | wc -l)
-
     # Create status view with watch for auto-refresh (top pane)
-    tmux send-keys -t "${session}:${win_base}.${pane_base}" "watch -n 2 -c 'git status --short'" Enter
+    tmux send-keys -t "${session}:${win_base}.${pane_base}" "watch -n 2 -c --no-wrap 'git -c color.status=always status --short'" Enter
 
-    # Split horizontally and create log view (bottom pane becomes new last pane)
-    tmux split-window -t "${session}:${win_base}.${pane_base}" -v -l 50% -c "#{pane_current_path}"
+    # Set pane title for git status
+    tmux select-pane -t "${session}:${win_base}.${pane_base}" -T "Git Status"
 
-    # Get the new pane index (it becomes pane_base + pane_count)
-    local new_pane_idx
-    new_pane_idx=$((pane_base + pane_count))
+    # Split horizontally and create log view
+    # The new pane becomes active after split-window
+    tmux split-window -t "${session}:${win_base}.${pane_base}" -v -l 50%
 
-    # Start log view in the new bottom pane with watch for auto-refresh
-    tmux send-keys -t "${session}:${win_base}.${new_pane_idx}" "watch -n 5 -c 'git log --oneline -20'" Enter
+    # Get the pane_id of the newly created (now active) pane
+    local new_pane_id
+    new_pane_id=$(tmux display-message -t "${session}" -p '#{pane_id}')
 
-    # Store the git log pane index for cleanup
-    tmux set-environment -t "$session" TMUX_CODE_GIT_LOG_PANE "$new_pane_idx"
+    # Start log view in the new pane (which is now active)
+    tmux send-keys -t "$new_pane_id" "watch -n 5 -c --no-wrap 'git log --oneline --color=always -20'" Enter
+
+    # Set pane title for git log
+    tmux select-pane -t "$new_pane_id" -T "Git Log"
+
+    # Store the git log pane id for cleanup
+    tmux set-environment -t "$session" TMUX_CODE_GIT_LOG_PANE "$new_pane_id"
 
     # Update mode tracking
     set_left_panel_mode "$session" "$MODE_GIT"
@@ -425,14 +451,11 @@ toggle_left_panel_mode() {
     else
         # Switch back to explorer mode
         # First, kill the git log pane if it exists
-        local git_log_pane
-        git_log_pane=$(tmux show-environment -t "$session" TMUX_CODE_GIT_LOG_PANE 2>/dev/null | cut -d= -f2)
-        if [[ -n "$git_log_pane" ]]; then
-            # Get base window index
-            local win_base
-            win_base=$(get_base_index)
-            # Kill the git log pane (it shifts other pane indices, but we target by ID)
-            tmux kill-pane -t "${session}:${win_base}.${git_log_pane}" 2>/dev/null || true
+        local git_log_pane_id
+        git_log_pane_id=$(tmux show-environment -t "$session" TMUX_CODE_GIT_LOG_PANE 2>/dev/null | cut -d= -f2)
+        if [[ -n "$git_log_pane_id" ]]; then
+            # Kill the git log pane by its pane_id (e.g., %5)
+            tmux kill-pane -t "$git_log_pane_id" 2>/dev/null || true
             tmux set-environment -t "$session" -u TMUX_CODE_GIT_LOG_PANE
         fi
 
@@ -464,30 +487,48 @@ launch_commands_in_panes() {
     win_base=$(get_base_index)
     pane_base=$(get_pane_base_index)
 
+    # Wrap explorer command (tree needs watch mode)
+    local wrapped_explorer
+    wrapped_explorer=$(wrap_explorer_cmd "$explorer_cmd")
+
     case "$layout" in
         3col)
             # Pane base+0: file explorer, Pane base+1: editor, Pane base+2: terminal, Pane base+3: AI
             if [[ -n "$explorer_cmd" ]]; then
-                tmux send-keys -t "${session}:${win_base}.${pane_base}" "$explorer_cmd" Enter
+                tmux send-keys -t "${session}:${win_base}.${pane_base}" "$wrapped_explorer" Enter
+                tmux select-pane -t "${session}:${win_base}.${pane_base}" -T "Explorer"
                 set_left_panel_mode "$session" "$MODE_EXPLORER"
             fi
-            [[ -n "$editor_cmd" ]] && tmux send-keys -t "${session}:${win_base}.$((pane_base + 1))" "$editor_cmd ." Enter
-            # Pane base+2 is terminal - leave as shell
-            [[ -n "$ai_cmd" ]] && tmux send-keys -t "${session}:${win_base}.$((pane_base + 3))" "$ai_cmd" Enter
+            if [[ -n "$editor_cmd" ]]; then
+                tmux send-keys -t "${session}:${win_base}.$((pane_base + 1))" "$editor_cmd ." Enter
+                tmux select-pane -t "${session}:${win_base}.$((pane_base + 1))" -T "Editor"
+            fi
+            tmux select-pane -t "${session}:${win_base}.$((pane_base + 2))" -T "Terminal"
+            if [[ -n "$ai_cmd" ]]; then
+                tmux send-keys -t "${session}:${win_base}.$((pane_base + 3))" "$ai_cmd" Enter
+                tmux select-pane -t "${session}:${win_base}.$((pane_base + 3))" -T "AI Agent"
+            fi
             ;;
         2col)
             # Pane base+0: file explorer, Pane base+1: editor, Pane base+2: terminal
             if [[ -n "$explorer_cmd" ]]; then
-                tmux send-keys -t "${session}:${win_base}.${pane_base}" "$explorer_cmd" Enter
+                tmux send-keys -t "${session}:${win_base}.${pane_base}" "$wrapped_explorer" Enter
+                tmux select-pane -t "${session}:${win_base}.${pane_base}" -T "Explorer"
                 set_left_panel_mode "$session" "$MODE_EXPLORER"
             fi
-            [[ -n "$editor_cmd" ]] && tmux send-keys -t "${session}:${win_base}.$((pane_base + 1))" "$editor_cmd ." Enter
-            # Pane base+2 is terminal - leave as shell
+            if [[ -n "$editor_cmd" ]]; then
+                tmux send-keys -t "${session}:${win_base}.$((pane_base + 1))" "$editor_cmd ." Enter
+                tmux select-pane -t "${session}:${win_base}.$((pane_base + 1))" -T "Editor"
+            fi
+            tmux select-pane -t "${session}:${win_base}.$((pane_base + 2))" -T "Terminal"
             ;;
         editor)
             # Pane base+0: editor, Pane base+1: terminal (no left panel mode)
-            [[ -n "$editor_cmd" ]] && tmux send-keys -t "${session}:${win_base}.${pane_base}" "$editor_cmd ." Enter
-            # Pane base+1 is terminal - leave as shell
+            if [[ -n "$editor_cmd" ]]; then
+                tmux send-keys -t "${session}:${win_base}.${pane_base}" "$editor_cmd ." Enter
+                tmux select-pane -t "${session}:${win_base}.${pane_base}" -T "Editor"
+            fi
+            tmux select-pane -t "${session}:${win_base}.$((pane_base + 1))" -T "Terminal"
             ;;
     esac
 }
@@ -523,6 +564,12 @@ configure_status_bar() {
     tmux set-option -t "$session" window-status-format " #I:#W "
     tmux set-option -t "$session" window-status-current-format "#[fg=colour117,bold] #I:#W "
     tmux set-option -t "$session" window-status-separator ""
+
+    # Pane border settings - show pane titles at top of each pane
+    tmux set-option -t "$session" pane-border-status top
+    tmux set-option -t "$session" pane-border-format " #{pane_title} "
+    tmux set-option -t "$session" pane-border-style "fg=colour238"
+    tmux set-option -t "$session" pane-active-border-style "fg=colour117"
 }
 
 # ============================================================================
