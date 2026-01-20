@@ -275,13 +275,31 @@ detect_editor() {
     fi
 }
 
-# Detect AI agent: claude → aider fallback chain
+# Detect AI agent: check multiple AI coding tools
+# Priority order: claude, aider, goose, copilot, cody, gpt, codex
 # Returns: command name or empty string if none available
 detect_ai_agent() {
+    # Claude Code (Anthropic)
     if command -v claude &>/dev/null; then
         echo "claude"
+    # Aider (popular AI pair programming)
     elif command -v aider &>/dev/null; then
         echo "aider"
+    # Goose (Block's AI agent)
+    elif command -v goose &>/dev/null; then
+        echo "goose"
+    # GitHub Copilot CLI
+    elif command -v copilot &>/dev/null; then
+        echo "copilot"
+    # Sourcegraph Cody CLI
+    elif command -v cody &>/dev/null; then
+        echo "cody"
+    # OpenAI GPT CLI
+    elif command -v gpt &>/dev/null; then
+        echo "gpt"
+    # OpenAI Codex
+    elif command -v codex &>/dev/null; then
+        echo "codex"
     else
         echo ""
     fi
