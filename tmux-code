@@ -278,7 +278,7 @@ wrap_explorer_cmd() {
     local cmd="$1"
     if [[ "$cmd" == "tree" ]]; then
         # Use watch for auto-refresh, -C for color
-        echo "watch -n 2 -c 'tree -C -L 3'"
+        echo "watch -n 2 -c -t 'tree -C -L 3'"
     else
         echo "$cmd"
     fi
@@ -410,7 +410,7 @@ start_git_mode() {
     sleep 0.1
 
     # Create status view with watch for auto-refresh (top pane)
-    tmux send-keys -t "${session}:${win_base}.${pane_base}" "watch -n 2 -c --no-wrap 'git -c color.status=always status --short'" Enter
+    tmux send-keys -t "${session}:${win_base}.${pane_base}" "watch -n 2 -c -t --no-wrap 'git -c color.status=always status --short'" Enter
 
     # Set pane title for git status
     tmux select-pane -t "${session}:${win_base}.${pane_base}" -T "Git Status"
@@ -424,7 +424,7 @@ start_git_mode() {
     new_pane_id=$(tmux display-message -t "${session}" -p '#{pane_id}')
 
     # Start log view in the new pane (which is now active)
-    tmux send-keys -t "$new_pane_id" "watch -n 5 -c --no-wrap 'git log --oneline --color=always -20'" Enter
+    tmux send-keys -t "$new_pane_id" "watch -n 5 -c -t --no-wrap 'git log --oneline --color=always -20'" Enter
 
     # Set pane title for git log
     tmux select-pane -t "$new_pane_id" -T "Git Log"
