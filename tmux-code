@@ -118,6 +118,46 @@ detect_ai_agent() {
 }
 
 # ============================================================================
+# Launch Commands in Panes (0h6.3.4)
+# ============================================================================
+
+# Launch detected commands in appropriate panes
+# Arguments:
+#   $1 - session name
+#   $2 - layout type: "3col" | "2col" | "editor"
+#   $3 - file explorer command (can be empty)
+#   $4 - editor command (can be empty)
+#   $5 - ai agent command (can be empty, only used for 3col)
+launch_commands_in_panes() {
+    local session="$1"
+    local layout="$2"
+    local explorer_cmd="$3"
+    local editor_cmd="$4"
+    local ai_cmd="${5:-}"
+
+    case "$layout" in
+        3col)
+            # Pane 0: file explorer, Pane 1: editor, Pane 2: terminal, Pane 3: AI
+            [[ -n "$explorer_cmd" ]] && tmux send-keys -t "${session}:0.0" "$explorer_cmd" Enter
+            [[ -n "$editor_cmd" ]] && tmux send-keys -t "${session}:0.1" "$editor_cmd ." Enter
+            # Pane 2 is terminal - leave as shell
+            [[ -n "$ai_cmd" ]] && tmux send-keys -t "${session}:0.3" "$ai_cmd" Enter
+            ;;
+        2col)
+            # Pane 0: file explorer, Pane 1: editor, Pane 2: terminal
+            [[ -n "$explorer_cmd" ]] && tmux send-keys -t "${session}:0.0" "$explorer_cmd" Enter
+            [[ -n "$editor_cmd" ]] && tmux send-keys -t "${session}:0.1" "$editor_cmd ." Enter
+            # Pane 2 is terminal - leave as shell
+            ;;
+        editor)
+            # Pane 0: editor, Pane 1: terminal
+            [[ -n "$editor_cmd" ]] && tmux send-keys -t "${session}:0.0" "$editor_cmd ." Enter
+            # Pane 1 is terminal - leave as shell
+            ;;
+    esac
+}
+
+# ============================================================================
 # Layout Creation (0h6.2.1, 0h6.2.2, 0h6.2.3)
 # ============================================================================
 
@@ -236,9 +276,40 @@ main() {
         esac
     fi
 
-    # Create new session with 3-column layout
+    # Detect available tools
+    local explorer_cmd
+    local editor_cmd
+    local ai_cmd
+    explorer_cmd=$(detect_file_explorer)
+    editor_cmd=$(detect_editor)
+    ai_cmd=$(detect_ai_agent)
+
+    # Determine layout based on available tools
+    local layout
+    if [[ -n "$ai_cmd" && -n "$explorer_cmd" ]]; then
+        layout="3col"
+    elif [[ -n "$explorer_cmd" ]]; then
+        layout="2col"
+    else
+        layout="editor"
+    fi
+
+    # Create session with appropriate layout
     echo "Creating session: $session_name"
-    create_3_column_layout "$session_name" "$abs_path"
+    case "$layout" in
+        3col)
+            create_3_column_layout "$session_name" "$abs_path"
+            ;;
+        2col)
+            create_2_column_layout "$session_name" "$abs_path"
+            ;;
+        editor)
+            create_editor_terminal_layout "$session_name" "$abs_path"
+            ;;
+    esac
+
+    # Launch commands in panes
+    launch_commands_in_panes "$session_name" "$layout" "$explorer_cmd" "$editor_cmd" "$ai_cmd"
 
     # Attach to session
     tmux attach-session -t "$session_name"
