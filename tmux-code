@@ -93,6 +93,18 @@ detect_file_explorer() {
     fi
 }
 
+# Detect editor: nvim → vim fallback chain
+# Returns: command name or empty string if none available
+detect_editor() {
+    if command -v nvim &>/dev/null; then
+        echo "nvim"
+    elif command -v vim &>/dev/null; then
+        echo "vim"
+    else
+        echo ""
+    fi
+}
+
 # ============================================================================
 # Layout Creation (0h6.2.1, 0h6.2.2, 0h6.2.3)
 # ============================================================================
