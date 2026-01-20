@@ -76,6 +76,24 @@ prompt_session_exists() {
 }
 
 # ============================================================================
+# Tool Detection (0h6.3.1, 0h6.3.2, 0h6.3.3)
+# ============================================================================
+
+# Detect file explorer: lf → ranger → tree fallback chain
+# Returns: command name or empty string if none available
+detect_file_explorer() {
+    if command -v lf &>/dev/null; then
+        echo "lf"
+    elif command -v ranger &>/dev/null; then
+        echo "ranger"
+    elif command -v tree &>/dev/null; then
+        echo "tree -C"
+    else
+        echo ""
+    fi
+}
+
+# ============================================================================
 # Layout Creation (0h6.2.1, 0h6.2.2, 0h6.2.3)
 # ============================================================================
 
