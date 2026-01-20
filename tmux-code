@@ -213,11 +213,9 @@ get_workspace_name() {
     basename "$abs_dir"
 }
 
-# Get the session name (prefixed with "code-")
+# Get the session name (same as workspace name)
 get_session_name() {
-    local workspace
-    workspace=$(get_workspace_name "${1:-.}")
-    echo "code-${workspace}"
+    get_workspace_name "${1:-.}"
 }
 
 # ============================================================================
@@ -570,6 +568,10 @@ configure_status_bar() {
     tmux set-option -t "$session" pane-border-format " #{pane_title} "
     tmux set-option -t "$session" pane-border-style "fg=colour238"
     tmux set-option -t "$session" pane-active-border-style "fg=colour117"
+
+    # Disable automatic window renaming (prevents "watch" showing as window name)
+    tmux set-option -t "$session" automatic-rename off
+    tmux set-option -t "$session" allow-rename off
 }
 
 # ============================================================================
@@ -763,6 +765,11 @@ main() {
             create_editor_terminal_layout "$session_name" "$abs_path"
             ;;
     esac
+
+    # Set window name to "tmux-code" (session already has workspace name)
+    local win_base
+    win_base=$(get_base_index)
+    tmux rename-window -t "${session_name}:${win_base}" "tmux-code"
 
     # Source keybindings
     source_keybindings "$session_name"
