@@ -1,0 +1,159 @@
+#!/usr/bin/env bash
+#
+# tmux-code - A VS Code-inspired terminal IDE using tmux
+#
+# Creates a tmux session with a 3-panel layout:
+#   - Left: File explorer (lf/ranger/tree)
+#   - Middle: Editor (nvim/vim) + Terminal
+#   - Right: AI assistant (claude/aider) - optional
+#
+
+set -euo pipefail
+
+# ============================================================================
+# Workspace Name Detection (0h6.1.1)
+# ============================================================================
+
+# Get workspace name from git repo name or fallback to directory name
+get_workspace_name() {
+    local dir="${1:-.}"
+    local abs_dir
+    abs_dir=$(cd "$dir" && pwd)
+
+    # Try git repo name first
+    local git_name
+    git_name=$(git -C "$abs_dir" rev-parse --show-toplevel 2>/dev/null | xargs basename 2>/dev/null) || true
+
+    if [[ -n "${git_name:-}" ]]; then
+        echo "$git_name"
+        return
+    fi
+
+    # Fall back to directory name
+    basename "$abs_dir"
+}
+
+# Get the session name (prefixed with "code-")
+get_session_name() {
+    local workspace
+    workspace=$(get_workspace_name "${1:-.}")
+    echo "code-${workspace}"
+}
+
+# ============================================================================
+# Layout Creation (0h6.2.1, 0h6.2.2, 0h6.2.3)
+# ============================================================================
+
+# Create 3-column layout with AI panel
+# Layout: Left (15%) | Middle-Editor (50%) + Terminal | Right-AI (35%)
+# Middle is split: Editor (70%) / Terminal (30%)
+create_3_column_layout() {
+    local session="$1"
+    local working_dir="$2"
+
+    # Create session with first window
+    tmux new-session -d -s "$session" -c "$working_dir"
+
+    # Split vertically: left (15%) | rest (85%)
+    tmux split-window -h -l 85% -c "$working_dir"
+
+    # Select right pane (pane 1), split vertically: middle (59%) | right (41%)
+    # 59% of 85% ≈ 50% total, 41% of 85% ≈ 35% total
+    tmux select-pane -t 1
+    tmux split-window -h -l 41% -c "$working_dir"
+
+    # Select middle pane (pane 1), split horizontally: editor (70%) | terminal (30%)
+    tmux select-pane -t 1
+    tmux split-window -v -l 30% -c "$working_dir"
+
+    # Pane layout now:
+    # Pane 0: Left (file explorer)
+    # Pane 1: Middle-top (editor)
+    # Pane 2: Middle-bottom (terminal)
+    # Pane 3: Right (AI assistant)
+
+    # Focus on editor pane
+    tmux select-pane -t 1
+}
+
+# Create 2-column layout without AI panel (0h6.2.2)
+# Layout: Left (20%) | Right-Editor (80%) + Terminal
+# Right is split: Editor (70%) / Terminal (30%)
+create_2_column_layout() {
+    local session="$1"
+    local working_dir="$2"
+
+    # Create session with first window
+    tmux new-session -d -s "$session" -c "$working_dir"
+
+    # Split vertically: left (20%) | right (80%)
+    tmux split-window -h -l 80% -c "$working_dir"
+
+    # Select right pane (pane 1), split horizontally: editor (70%) | terminal (30%)
+    tmux select-pane -t 1
+    tmux split-window -v -l 30% -c "$working_dir"
+
+    # Pane layout now:
+    # Pane 0: Left (file explorer)
+    # Pane 1: Right-top (editor)
+    # Pane 2: Right-bottom (terminal)
+
+    # Focus on editor pane
+    tmux select-pane -t 1
+}
+
+# Create editor/terminal split layout (0h6.2.3)
+# Simple 2-pane layout: Editor (70%) / Terminal (30%)
+# Used when no file explorer is available
+create_editor_terminal_layout() {
+    local session="$1"
+    local working_dir="$2"
+
+    # Create session with first window
+    tmux new-session -d -s "$session" -c "$working_dir"
+
+    # Split horizontally: editor (70%) | terminal (30%)
+    tmux split-window -v -l 30% -c "$working_dir"
+
+    # Pane layout now:
+    # Pane 0: Top (editor)
+    # Pane 1: Bottom (terminal)
+
+    # Focus on editor pane
+    tmux select-pane -t 0
+}
+
+# ============================================================================
+# Main Entry Point
+# ============================================================================
+
+main() {
+    local path="${1:-.}"
+
+    # Resolve to absolute path
+    local abs_path
+    abs_path=$(cd "$path" && pwd)
+
+    # Get session name
+    local session_name
+    session_name=$(get_session_name "$path")
+
+    # Check if session already exists
+    if tmux has-session -t "$session_name" 2>/dev/null; then
+        echo "Session '$session_name' already exists. Attaching..."
+        tmux attach-session -t "$session_name"
+        return 0
+    fi
+
+    # Create new session with 3-column layout
+    echo "Creating session: $session_name"
+    create_3_column_layout "$session_name" "$abs_path"
+
+    # Attach to session
+    tmux attach-session -t "$session_name"
+}
+
+# Run main if script is executed directly (not sourced)
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
