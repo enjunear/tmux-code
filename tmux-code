@@ -105,6 +105,18 @@ detect_editor() {
     fi
 }
 
+# Detect AI agent: claude → aider fallback chain
+# Returns: command name or empty string if none available
+detect_ai_agent() {
+    if command -v claude &>/dev/null; then
+        echo "claude"
+    elif command -v aider &>/dev/null; then
+        echo "aider"
+    else
+        echo ""
+    fi
+}
+
 # ============================================================================
 # Layout Creation (0h6.2.1, 0h6.2.2, 0h6.2.3)
 # ============================================================================
