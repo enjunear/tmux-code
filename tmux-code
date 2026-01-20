@@ -253,6 +253,38 @@ start_explorer_mode() {
     set_left_panel_mode "$session" "$MODE_EXPLORER"
 }
 
+# Start git mode in the left panel (pane 0)
+# Shows git status --short (top) and git log --oneline (bottom) in a split pane
+# Uses watch to auto-refresh git status
+start_git_mode() {
+    local session="${1:-$(tmux display-message -p '#S')}"
+
+    # Kill any existing process in pane 0
+    tmux send-keys -t "${session}:0.0" C-c
+    sleep 0.1
+
+    # Split pane 0 horizontally: status (top 50%) | log (bottom 50%)
+    # First check if there's already a git-mode split (pane 0 has a nested split)
+    local pane_count
+    pane_count=$(tmux list-panes -t "${session}:0" | wc -l)
+
+    # Create status view with watch for auto-refresh (top pane)
+    tmux send-keys -t "${session}:0.0" "watch -n 2 -c 'git status --short'" Enter
+
+    # Split horizontally and create log view (bottom pane becomes new last pane)
+    tmux split-window -t "${session}:0.0" -v -l 50% -c "#{pane_current_path}"
+
+    # Get the new pane index (it becomes the last pane)
+    local new_pane_idx
+    new_pane_idx=$((pane_count))
+
+    # Start log view in the new bottom pane with watch for auto-refresh
+    tmux send-keys -t "${session}:0.${new_pane_idx}" "watch -n 5 -c 'git log --oneline -20'" Enter
+
+    # Update mode tracking
+    set_left_panel_mode "$session" "$MODE_GIT"
+}
+
 # ============================================================================
 # Launch Commands in Panes (0h6.3.4)
 # ============================================================================
